@@ -2,6 +2,8 @@ const vscode = require('vscode');
 const openAiModule = require('openai');
 const fs = require('fs');
 const path = require('path');
+const util = require('util')
+const exec = util.promisify(require('child_process').exec);
 
 const apiKey = vscode.workspace.getConfiguration('AutoCommit').get('apiKey');
 const autoSync = vscode.workspace.getConfiguration('AutoCommit').get('autoSync');
@@ -12,11 +14,51 @@ const configuration = new openAiModule.Configuration({
 const openAi = new openAiModule.OpenAIApi(configuration);
 const gitExtension = vscode.extensions.getExtension('vscode.git')
 let chatCompletion = null;
+let isCommitting = false;
 
+class GitCommitsProvider {
+	constructor() {
+		this._onDidChangeTreeData = new vscode.EventEmitter();
+		this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+	}
 
-async function createChatCompletion(changes) {
+	getTreeItem(element) {
+		return element;
+	}
+
+	refresh() {
+		this._onDidChangeTreeData.fire();
+	}
+
+	async getChildren(element) {
+		try {
+			await exec('git fetch origin', { cwd: vscode.workspace.rootPath });
+
+			// Now get the log of unsynced commits
+			const { stdout } = await exec('git log --branches --not --remotes --decorate --oneline', { cwd: vscode.workspace.rootPath });
+			const commits = stdout.split('\n').map(commit => new vscode.TreeItem(commit));
+			return commits;
+		} catch (error) {
+			// handle the error
+			console.error(`Failed to get commits: ${error.message}`);
+			vscode.window.showErrorMessage(`Failed to get commits: ${error.message}`);
+			return [];
+		}
+	}
+}
+
+async function createChatCompletion(file) {
 	try {
-		if (changes.length >= 1) {
+		console.log('changesatcreate', file)
+		
+		if(file.changes == 'DELETED'){
+			return 'Removing this file.'
+		}
+		if(file.changes == 'UNTRACKED'){
+			return 'Init'
+		}
+
+		if (file.changes.length >= 1) {
 			chatCompletion = await openAi.createChatCompletion({
 				model: 'gpt-3.5-turbo',
 				messages: [
@@ -41,7 +83,7 @@ For example, if a new feature 'test' replaces two existing functions 'helloWorld
 Now, apply these guidelines to generate a commit message for the following 'git diff':
 
 GIT DIFF
-${changes}`
+${file.changes}`
 					},
 				],
 				max_tokens: 1024,
@@ -65,9 +107,23 @@ ${changes}`
  */
 async function activate(context) {
 
+	const gitCommitsProvider = new GitCommitsProvider();
+    vscode.window.createTreeView('unpushedCommits', {
+        treeDataProvider: gitCommitsProvider,
+        showCollapseAll: true
+    });
+
 	let disposable2 = vscode.commands.registerCommand('commitAll', async function commitAll() {
+		// If commit operation is already in progress, we show a warning and return early.
+		if (isCommitting) {
+			vscode.window.showWarningMessage('Commit is already in progress...');
+			return;
+		}
+
+		isCommitting = true;  // Set flag to indicate that a commit operation has started.
+
 		try {
-			const allFiles = []
+			const allFiles = [];
 			const gitignorePath = path.join(vscode.workspace.rootPath, '.gitignore');
 			let gitignoreContent;
 			let allFilesData;
@@ -83,9 +139,9 @@ async function activate(context) {
 					.filter(line => line.trim() !== '' && !line.startsWith('#'))
 					.map(line => '**/' + line.trim());
 				const excludePattern = `{${gitignorePatterns.join(',')}}`;
-				allFilesData = await vscode.workspace.findFiles('**/*', excludePattern)
+				allFilesData = await vscode.workspace.findFiles('**/*', excludePattern);
 			} else {
-				allFilesData = await vscode.workspace.findFiles('**/*')
+				allFilesData = await vscode.workspace.findFiles('**/*');
 			}
 
 			for (const file of allFilesData) {
@@ -96,13 +152,17 @@ async function activate(context) {
 			const updatedFileData = await getAllChanges(allFiles);
 			await getAllMessages(updatedFileData);
 
-			// Loop over all the files and their messages, commit each one individually
 			for (let fileData of updatedFileData) {
 				let cmd;
+				console.log('changes', fileData.changes)
+				console.log('path', fileData.fPath)
+				
 				if (fs.existsSync(fileData.fPath)) {
 					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
-				} else {
+				} else if (fileData.changes == 'DELETED'){
 					cmd = `git rm ${fileData.fPath} && git commit -m "${fileData.message}"`;
+				} else{
+					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
 				}
 				const { stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
 
@@ -110,6 +170,7 @@ async function activate(context) {
 					vscode.window.showErrorMessage(`Error committing file '${fileData.fPath}':`, stderr);
 				}
 			}
+
 			if (autoSync) {
 				const cmd = 'git push';
 				const { stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
@@ -119,9 +180,12 @@ async function activate(context) {
 				}
 			}
 
+			gitCommitsProvider.refresh();
 		} catch (error) {
 			console.error(`Error committing all: ${error.message}`);
 			vscode.window.showErrorMessage(`Error committing all: ${error.message}`);
+		} finally {
+			isCommitting = false;  // Reset flag to indicate that the commit operation has ended.
 		}
 	});
 
@@ -201,7 +265,7 @@ async function activate(context) {
 
 	async function getAllMessages(allFileData) {
 		try {
-			const messagesPromises = allFileData.map(file => createChatCompletion(file.changes));
+			const messagesPromises = allFileData.map(file => createChatCompletion(file));
 			const messages = await Promise.all(messagesPromises);
 			allFileData.forEach((file, index) => {
 				file.message = messages[index];
