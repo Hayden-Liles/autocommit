@@ -66,7 +66,8 @@ async function createChatCompletion(changes) {
 			throw new Error('No response from OpenAI')
 		}
 	} catch (err) {
-		vscode.window.showErrorMessage('Error creating chat completion:', err);
+		console.error(`Error creating chat completion: ${err.message}`);
+		vscode.window.showErrorMessage(`Error creating chat completion: ${err.message}`);
 	}
 }
 
@@ -129,7 +130,8 @@ async function activate(context) {
 			}
 
 		} catch (error) {
-			vscode.window.showErrorMessage(error)
+			console.error(`Error committing all: ${error.message}`);
+			vscode.window.showErrorMessage(`Error committing all: ${error.message}`);
 		}
 	});
 
@@ -184,7 +186,8 @@ async function activate(context) {
 
 			return allFilesData;
 		} catch (error) {
-			vscode.window.showErrorMessage(error);
+			console.error(`Error getting all changes: ${error.message}`);
+			vscode.window.showErrorMessage(`Error getting all changes: ${error.message}`);
 		}
 	}
 
@@ -196,7 +199,8 @@ async function activate(context) {
 				file.message = messages[index];
 			});
 		} catch (error) {
-			vscode.window.showErrorMessage(error);
+			console.error(`Error getting all messages: ${error.message}`);
+			vscode.window.showErrorMessage(`Error getting all messages: ${error.message}`);
 		}
 	}
 
