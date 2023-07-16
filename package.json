@@ -13,6 +13,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onFileSystem:git"
   ],
   "contributes": {
     "configuration": {
@@ -45,7 +46,15 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "views": {
+      "scm": [
+          {
+              "id": "unpushedCommits",
+              "name": "Unpushed Commits"
+          }
+      ]
+  }
   },
   "main": "./extension.js",
   "scripts": {
