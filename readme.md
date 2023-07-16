@@ -5,7 +5,7 @@ AutoCommit is a VS Code extension that automatically generates and commits descr
 ## Features
 
 - Automatically generates commit messages based on your changes. (Uses gpt 3.5 - 4 was unessicary and more expensive)
-- Commits each changed file separately with a relevant commit message.
+- Commits each changed file separately with a relevant commit message. (The Prompt is 316 Tokens OR $0.000474)
 - Avoids committing files specified in `.gitignore`.
 - Optionally pushes changes to the remote repository automatically. (Can be changed in settings DEFAULT: true)
 
