@@ -2,7 +2,7 @@
   "name": "autocommit",
   "displayName": "AutoCommit",
   "description": "",
-  "repository": "",
+  "repository": "https://github.com/Hayden-Liles/autocommit",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.80.0"
@@ -11,7 +11,6 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
   ],
   "contributes": {
     "configuration": {
