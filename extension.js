@@ -66,7 +66,7 @@ async function createChatCompletion(changes) {
 			throw new Error('No response from OpenAI')
 		}
 	} catch (err) {
-		console.error('Error creating chat completion:', err);
+		vscode.window.showErrorMessage('Error creating chat completion:', err);
 	}
 }
 
@@ -116,7 +116,7 @@ async function activate(context) {
 				const { stdout, stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
 
 				if (stderr) {
-					console.error(`Error committing file '${fileData.fPath}':`, stderr);
+					vscode.window.showErrorMessage(`Error committing file '${fileData.fPath}':`, stderr);
 				}
 			}
 			if (autoSync) {
@@ -124,12 +124,12 @@ async function activate(context) {
 				const { stdout: pushStdout, stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
 
 				if (pushStderr) {
-					console.error(`Error pushing changes:`, pushStderr);
+					vscode.window.showErrorMessage(`Error pushing changes:`, pushStderr);
 				}
 			}
 
 		} catch (error) {
-			console.error(error)
+			vscode.window.showErrorMessage(error)
 		}
 	});
 
@@ -153,7 +153,7 @@ async function activate(context) {
 				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath });
 
 				if (stderr) {
-					console.error(`Error for 'git diff' command:`, stderr);
+					vscode.window.showErrorMessage(`Error for 'git diff' command:`, stderr);
 					continue;
 				}
 
@@ -169,7 +169,7 @@ async function activate(context) {
 			const { stdout: untrackedFiles, stderr } = await exec('git ls-files --others --exclude-standard', { cwd: repo.rootUri.fsPath });
 
 			if (stderr) {
-				console.error(`Error for 'git ls-files' command:`, stderr);
+				vscode.window.showErrorMessage(`Error for 'git ls-files' command:`, stderr);
 			} else {
 				untrackedFiles.split('\n').forEach(file => {
 					if (file) {
@@ -184,7 +184,7 @@ async function activate(context) {
 
 			return allFilesData;
 		} catch (error) {
-			console.error(error);
+			vscode.window.showErrorMessage(error);
 		}
 	}
 
@@ -196,7 +196,7 @@ async function activate(context) {
 				file.message = messages[index];
 			});
 		} catch (error) {
-			console.error(error);
+			vscode.window.showErrorMessage(error);
 		}
 	}
 
