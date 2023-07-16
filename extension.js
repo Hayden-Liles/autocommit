@@ -111,9 +111,12 @@ async function activate(context) {
 
 			// Loop over all the files and their messages, commit each one individually
 			for (let fileData of updatedFileData) {
-				console.log('FILEDATA', fileData)
-				console.log('message???', fileData.message)
-				const cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
+				let cmd;
+				if (fs.existsSync(fileData.fPath)) {
+					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
+				} else {
+					cmd = `git rm ${fileData.fPath} && git commit -m "${fileData.message}"`;
+				}
 				const { stdout, stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
 
 				if (stderr) {
@@ -123,8 +126,8 @@ async function activate(context) {
 			if (autoSync) {
 				const cmd = 'git push';
 				const { stdout: pushStdout, stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
-
-				if (pushStderr) {
+				
+				if (pushStderr && !pushStderr.includes('->')) {
 					vscode.window.showErrorMessage(`Error pushing changes:`, pushStderr);
 				}
 			}
@@ -150,7 +153,25 @@ async function activate(context) {
 
 			const [repo] = await git.repositories;
 
+			const { stdout: deletedFiles, stderr } = await exec('git ls-files --deleted', { cwd: repo.rootUri.fsPath });
+
+			if (stderr) {
+				vscode.window.showErrorMessage(`Error for 'git ls-files --deleted' command:`, stderr);
+			} else {
+				deletedFiles.split('\n').forEach(file => {
+					if (file) {
+						const fileData = {
+							fPath: file,
+							changes: 'DELETED'
+						};
+						allFilesData.push(fileData);
+					}
+				});
+			}
+
 			for (let file of allFiles) {
+				if (!fs.existsSync(file)) continue;
+
 				const cmd = `git diff ${file}`;
 				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath });
 
@@ -168,10 +189,10 @@ async function activate(context) {
 				}
 			}
 
-			const { stdout: untrackedFiles, stderr } = await exec('git ls-files --others --exclude-standard', { cwd: repo.rootUri.fsPath });
+			const { stdout: untrackedFiles, stderr: stderr2 } = await exec('git ls-files --others --exclude-standard', { cwd: repo.rootUri.fsPath });
 
-			if (stderr) {
-				vscode.window.showErrorMessage(`Error for 'git ls-files' command:`, stderr);
+			if (stderr2) {
+				vscode.window.showErrorMessage(`Error for 'git ls-files' command:`, stderr2);
 			} else {
 				untrackedFiles.split('\n').forEach(file => {
 					if (file) {
