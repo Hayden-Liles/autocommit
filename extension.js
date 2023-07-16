@@ -23,38 +23,25 @@ async function createChatCompletion(changes) {
 					{
 						role: 'user',
 						content: `
-	As an AI, your task is to create a succinct, informative commit message following the Conventional Commit standard. This standard requires a commit message that clearly outlines the type of changes made (feat, fix, refactor, etc.), along with a brief yet descriptive explanation. The commit message should ideally be within 50 characters.
-	Here are a few guidelines:
-	1. Start with the type of change: 'feat', 'fix', 'chore', 'docs', 'style', 'refactor', 'perf', 'test', etc.
-	2. If a function or method is added or removed, make sure to include that in the message.
-	3. Keep it brief, yet informative.
-	4. Keep it all on the same line meaning no line breaks.
-	For example, given a 'git diff' where a new feature 'test' replaces two existing functions 'helloWorld' and 'helloWorld2', a possible commit message could be: 'feat: Replace helloWorld functions with test'.					
-	Here are some elaborated guidelines:
-	The commit message should start with the type of change, i.e., 'feat', 'fix', etc. This type provides an immediate understanding of the nature of the changes in the commit.
-	If the commit involves the addition, modification, or removal of functions or methods, these should be explicitly mentioned in the message. This gives a quick overview of where in the codebase the changes have been made.
-	While brevity is important, do not sacrifice necessary information for the sake of a shorter message. Your goal is to communicate effectively with your team.
-	To illustrate this, suppose we have a 'git diff' that shows a new feature, called 'test', replacing two existing functions: 'helloWorld' and 'helloWorld2'. A possible commit message following these guidelines could be: 'feat: Replace helloWorld functions with test'. This message is succinct, gives an immediate overview of the change type (a feature), and describes the essence of the changes (replacement of two functions with a new one).
-	Now, let's apply these guidelines to the given 'git diff':
-	GIT DIFF
-	diff
-	Copy code
-	diff --git a/test.py b/test.py
-	index a3d76e1..7e5b5d0 100644
-	--- a/test.py
-	+++ b/test.py
-	@@ -1,5 +1,3 @@
-	-def helloWorld():
-	- print("Hello, World!")
-	-
-	-def helloWorld2():
-	- print("Hello, World2!")
-	+def test():
-	+ print("test")
-	+ \ No newline at end of file
-	The diff shows the removal of two functions: 'helloWorld' and 'helloWorld2', and the introduction of a new function: 'test'. Hence, a commit message in line with the Conventional Commit standards could be: 'feat: Replace helloWorld functions with test'. This message succinctly conveys that a new feature has been implemented in the 'test.py' file, and this feature involves replacing the 'helloWorld' functions with a new function named 'test'.
-	Now, here's a 'git diff' for you to generate a commit message:
-	***GIT DIFF***${changes}`
+The response you received is not incorrect, as the changes could be interpreted as a refactor (changing the structure of the code without changing its behavior). However, if you want to guide the AI towards interpreting the changes as a new feature (feat), you could clarify the definitions of 'feat' and 'refactor' in your prompt. Here's a revised version of the prompt:
+
+As an AI, your task is to generate a concise and informative commit message following the Conventional Commit standard. This standard requires a commit message to clearly outline the type of changes made and provide a brief, descriptive explanation. The commit message should ideally be within 50 characters and contain no line breaks.
+
+Here are the guidelines:
+
+Begin with the type of change:
+'feat' for new features or significant changes that add new capabilities to the code.
+'fix' for bug fixes.
+'refactor' for changes in the code structure that do not alter its external behavior.
+Other types include 'chore', 'docs', 'style', 'perf', 'test', etc.
+If a function or method is added, modified, or removed, include that in the message.
+Keep the message brief but informative.
+For example, if a new feature 'test' replaces two existing functions 'helloWorld' and 'helloWorld2', a suitable commit message could be: 'feat: Replace helloWorld functions with test'.
+
+Now, apply these guidelines to generate a commit message for the following 'git diff':
+
+GIT DIFF
+${changes}`
 					},
 				],
 				max_tokens: 1024,
@@ -126,7 +113,7 @@ async function activate(context) {
 			if (autoSync) {
 				const cmd = 'git push';
 				const { stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
-				
+
 				if (pushStderr && !pushStderr.includes('->')) {
 					vscode.window.showErrorMessage(`Error pushing changes:`, pushStderr);
 				}
