@@ -1,6 +1,7 @@
 {
-  "name": "autocommit",
-  "displayName": "AutoCommit",
+  "name": "commitit",
+  "publisher": "HaydenLiles",
+  "displayName": "Commit It",
   "description": "",
   "repository": "https://github.com/Hayden-Liles/autocommit",
   "version": "0.0.1",
