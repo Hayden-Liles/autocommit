@@ -117,7 +117,7 @@ async function activate(context) {
 				} else {
 					cmd = `git rm ${fileData.fPath} && git commit -m "${fileData.message}"`;
 				}
-				const { stdout, stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
+				const { stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
 
 				if (stderr) {
 					vscode.window.showErrorMessage(`Error committing file '${fileData.fPath}':`, stderr);
@@ -125,7 +125,7 @@ async function activate(context) {
 			}
 			if (autoSync) {
 				const cmd = 'git push';
-				const { stdout: pushStdout, stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
+				const { stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
 				
 				if (pushStderr && !pushStderr.includes('->')) {
 					vscode.window.showErrorMessage(`Error pushing changes:`, pushStderr);
