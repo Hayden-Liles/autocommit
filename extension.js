@@ -49,12 +49,12 @@ class GitCommitsProvider {
 
 async function createChatCompletion(file) {
 	try {
-		console.log('changesatcreate', file)
-		
+		console.log(file)
 		if(file.changes == 'DELETED'){
 			return 'Removing this file.'
 		}
 		if(file.changes == 'UNTRACKED'){
+			console.log(file.text)
 			return 'Init'
 		}
 
@@ -146,7 +146,10 @@ async function activate(context) {
 
 			for (const file of allFilesData) {
 				const document = await vscode.workspace.openTextDocument(file);
-				allFiles.push(document.uri.fsPath);
+				allFiles.push({
+					fPath: document.uri.fsPath,
+					documentText: document.getText()
+				});
 			}
 
 			const updatedFileData = await getAllChanges(allFiles);
@@ -154,8 +157,6 @@ async function activate(context) {
 
 			for (let fileData of updatedFileData) {
 				let cmd;
-				console.log('changes', fileData.changes)
-				console.log('path', fileData.fPath)
 				
 				if (fs.existsSync(fileData.fPath)) {
 					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
@@ -221,9 +222,9 @@ async function activate(context) {
 			}
 
 			for (let file of allFiles) {
-				if (!fs.existsSync(file)) continue;
-
-				const cmd = `git diff ${file}`;
+				if (!fs.existsSync(file.fPath)) continue;
+				
+				const cmd = `git diff ${file.fPath}`;
 				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath });
 
 				if (stderr) {
@@ -233,8 +234,9 @@ async function activate(context) {
 
 				if (stdout !== '') {
 					const fileData = {
-						fPath: file,
-						changes: stdout
+						fPath: file.fPath,
+						changes: stdout,
+						text: file.documentText
 					};
 					allFilesData.push(fileData);
 				}
@@ -249,7 +251,7 @@ async function activate(context) {
 					if (file) {
 						const fileData = {
 							fPath: file,
-							changes: 'UNTRACKED'
+							changes: 'UNTRACKED',
 						};
 						allFilesData.push(fileData);
 					}
@@ -265,6 +267,7 @@ async function activate(context) {
 
 	async function getAllMessages(allFileData) {
 		try {
+			console.log('allfileData:: ', allFileData)
 			const messagesPromises = allFileData.map(file => createChatCompletion(file));
 			const messages = await Promise.all(messagesPromises);
 			allFileData.forEach((file, index) => {
