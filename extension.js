@@ -34,12 +34,12 @@ class GitCommitsProvider {
 		try {
 			await exec('git fetch origin', { cwd: vscode.workspace.rootPath });
 
-			// Now get the log of unsynced commits
+
 			const { stdout } = await exec('git log --branches --not --remotes --decorate --oneline', { cwd: vscode.workspace.rootPath });
 			const commits = stdout.split('\n').map(commit => new vscode.TreeItem(commit));
 			return commits;
 		} catch (error) {
-			// handle the error
+
 			console.error(`Failed to get commits: ${error.message}`);
 			vscode.window.showErrorMessage(`Failed to get commits: ${error.message}`);
 			return [];
@@ -50,10 +50,10 @@ class GitCommitsProvider {
 async function createChatCompletion(file) {
 	try {
 		console.log(file)
-		if(file.changes == 'DELETED'){
+		if (file.changes == 'DELETED') {
 			return 'Removing this file.'
 		}
-		if(file.changes == 'UNTRACKED'){
+		if (file.changes == 'UNTRACKED') {
 			console.log(file.text)
 			return 'Init'
 		}
@@ -108,19 +108,19 @@ ${file.changes}`
 async function activate(context) {
 
 	const gitCommitsProvider = new GitCommitsProvider();
-    vscode.window.createTreeView('unpushedCommits', {
-        treeDataProvider: gitCommitsProvider,
-        showCollapseAll: true
-    });
+	vscode.window.createTreeView('unpushedCommits', {
+		treeDataProvider: gitCommitsProvider,
+		showCollapseAll: true
+	});
 
 	let disposable2 = vscode.commands.registerCommand('commitAll', async function commitAll() {
-		// If commit operation is already in progress, we show a warning and return early.
+
 		if (isCommitting) {
 			vscode.window.showWarningMessage('Commit is already in progress...');
 			return;
 		}
 
-		isCommitting = true;  // Set flag to indicate that a commit operation has started.
+		isCommitting = true;
 
 		try {
 			const allFiles = [];
@@ -128,7 +128,7 @@ async function activate(context) {
 			let gitignoreContent;
 			let allFilesData;
 
-			// Check if the .gitignore file exists before trying to read it
+
 			if (fs.existsSync(gitignorePath)) {
 				gitignoreContent = fs.readFileSync(gitignorePath, 'utf8');
 			}
@@ -157,12 +157,12 @@ async function activate(context) {
 
 			for (let fileData of updatedFileData) {
 				let cmd;
-				
+
 				if (fs.existsSync(fileData.fPath)) {
 					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
-				} else if (fileData.changes == 'DELETED'){
+				} else if (fileData.changes == 'DELETED') {
 					cmd = `git rm ${fileData.fPath} && git commit -m "${fileData.message}"`;
-				} else{
+				} else {
 					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
 				}
 				const { stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
@@ -186,7 +186,7 @@ async function activate(context) {
 			console.error(`Error committing all: ${error.message}`);
 			vscode.window.showErrorMessage(`Error committing all: ${error.message}`);
 		} finally {
-			isCommitting = false;  // Reset flag to indicate that the commit operation has ended.
+			isCommitting = false;
 		}
 	});
 
@@ -223,7 +223,7 @@ async function activate(context) {
 
 			for (let file of allFiles) {
 				if (!fs.existsSync(file.fPath)) continue;
-				
+
 				const cmd = `git diff ${file.fPath}`;
 				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath });
 
