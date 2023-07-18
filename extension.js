@@ -54,8 +54,40 @@ async function createChatCompletion(file) {
 			return 'Removing this file.'
 		}
 		if (file.changes == 'UNTRACKED') {
-			console.log(file.text)
-			return 'Init'
+			const git = await gitExtension.exports.getAPI(1);
+			const [repo] = await git.repositories;
+			const absoluteFilePath = path.join(repo.rootUri.fsPath, file.fPath);
+			const document = await vscode.workspace.openTextDocument(absoluteFilePath);
+
+			if (file.changes.length >= 1) {
+				chatCompletion = await openAi.createChatCompletion({
+					model: 'gpt-3.5-turbo',
+					messages: [
+						{
+							role: 'user',
+							content: `
+							As an AI, generate a concise, informative commit message following the Conventional Commit standard. This standard requires a commit message to outline the type of changes (e.g., 'feat', 'fix', 'refactor') and provide a brief explanation. The message should be within 50 characters and contain no line breaks.
+
+							Guidelines:
+							
+							Begin with the type of change: 'feat', 'fix', 'refactor', etc.
+							If a new file is being added, include the file name and a brief description of its purpose or contents.
+							Keep the message brief but informative.
+							For example, if a new file 'test.py' is added with a function 'helloWorld', a suitable commit message could be: 'feat: Add test.py with helloWorld function'.
+							
+							Now, generate a commit message for the following new code file:
+							
+							NEW CODE FILE${document.getText()}`
+						},
+					],
+					max_tokens: 1024,
+				});
+			}
+			if (chatCompletion && chatCompletion.data && chatCompletion.data.choices && chatCompletion.data.choices[0]) {
+				return chatCompletion.data.choices[0].message.content;
+			} else {
+				throw new Error('No response from OpenAI')
+			}
 		}
 
 		if (file.changes.length >= 1) {
