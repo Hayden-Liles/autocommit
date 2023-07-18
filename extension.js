@@ -33,8 +33,6 @@ class GitCommitsProvider {
 	async getChildren(element) {
 		try {
 			await exec('git fetch origin', { cwd: vscode.workspace.rootPath });
-
-
 			const { stdout } = await exec('git log --branches --not --remotes --decorate --oneline', { cwd: vscode.workspace.rootPath });
 			const commits = stdout.split('\n').map(commit => new vscode.TreeItem(commit));
 			return commits;
