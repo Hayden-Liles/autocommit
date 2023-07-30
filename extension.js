@@ -213,11 +213,11 @@ async function activate(context) {
 				let cmd;
 
 				if (fs.existsSync(fileData.fPath)) {
-					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
+					cmd = `git add "${fileData.fPath}" && git commit -m "${fileData.message}"`;
 				} else if (fileData.changes == 'DELETED') {
-					cmd = `git rm ${fileData.fPath} && git commit -m "${fileData.message}"`;
+					cmd = `git rm "${fileData.fPath}" && git commit -m "${fileData.message}"`;
 				} else {
-					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
+					cmd = `git add "${fileData.fPath}" && git commit -m "${fileData.message}"`;
 				}
 				const { stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
 
@@ -278,7 +278,7 @@ async function activate(context) {
 			for (let file of allFiles) {
 				const canRead = await canReadFile(file.fPath);
 				if(!canRead) continue;
-				const cmd = `git diff ${file.fPath}`;
+				const cmd = `git diff "${file.fPath}"`;
 				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath, maxBuffer: 1024 * 1024 * 50 });
 
 				if (stderr) {
@@ -312,7 +312,7 @@ async function activate(context) {
 				});
 			}
 
-			return allFilesData;
+			return allFilesData || [];
 		} catch (error) {
 			console.error(`Error getting all changes: ${error.message}`);
 			vscode.window.showErrorMessage(`Error getting all changes: ${error.message}`);
@@ -321,6 +321,7 @@ async function activate(context) {
 
 	async function getAllMessages(allFileData) {
 		try {
+			console.log(`All file data: ${allFileData}`)
 			const messagesPromises = allFileData.map(file => createChatCompletion(file));
 			const messages = await Promise.all(messagesPromises);
 			allFileData.forEach((file, index) => {
