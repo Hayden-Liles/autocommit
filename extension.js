@@ -74,8 +74,8 @@ async function createChatCompletion(file) {
 			const document = await vscode.workspace.openTextDocument(absoluteFilePath);
 
 			let content = document.getText();
-			if(content.length > 3500) {
-				content = content.substring(0, 3500);
+			if(content.length > 4500) {
+				content = content.substring(0, 4500);
 			}
 
 			if (file.changes.length >= 1) {
@@ -110,8 +110,8 @@ async function createChatCompletion(file) {
 		}		
 
 		if (file.changes.length >= 1) {
-			if(file.changes.length > 3500) {
-				file.changes = file.changes.substring(0, 3500);
+			if(file.changes.length > 4500) {
+				file.changes = file.changes.substring(0, 4500);
 			}
 			chatCompletion = await openAi.createChatCompletion({
 				model: 'gpt-3.5-turbo',
