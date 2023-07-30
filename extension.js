@@ -30,10 +30,12 @@ class GitCommitsProvider {
 		this._onDidChangeTreeData.fire();
 	}
 
-	async getChildren(element) {
+	
+
+	async getChildren() {
 		try {
-			await exec('git fetch origin', { cwd: vscode.workspace.rootPath });
-			const { stdout } = await exec('git log --branches --not --remotes --decorate --oneline', { cwd: vscode.workspace.rootPath });
+			await exec('git fetch origin', { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
+			const { stdout } = await exec('git log --branches --not --remotes --decorate --oneline', { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
 			const commits = stdout.split('\n').map(commit => new vscode.TreeItem(commit));
 			return commits;
 		} catch (error) {
@@ -45,17 +47,36 @@ class GitCommitsProvider {
 	}
 }
 
+async function canReadFile(filePath) {
+    return new Promise((resolve) => {
+        fs.access(filePath, fs.constants.R_OK, (err) => {
+            if (err) {
+                console.error(`Cannot read file ${filePath}`);
+                resolve(false);
+            } else {
+                resolve(true);
+            }
+        });
+    });
+}
+
 async function createChatCompletion(file) {
 	try {
-		console.log(file)
 		if (file.changes == 'DELETED') {
 			return 'Removing this file.'
 		}
+
 		if (file.changes == 'UNTRACKED') {
+			console.log(file)
 			const git = await gitExtension.exports.getAPI(1);
 			const [repo] = await git.repositories;
 			const absoluteFilePath = path.join(repo.rootUri.fsPath, file.fPath);
 			const document = await vscode.workspace.openTextDocument(absoluteFilePath);
+
+			let content = document.getText();
+			if(content.length > 3500) {
+				content = content.substring(0, 3500);
+			}
 
 			if (file.changes.length >= 1) {
 				chatCompletion = await openAi.createChatCompletion({
@@ -71,11 +92,11 @@ async function createChatCompletion(file) {
 							Begin with the type of change: 'feat', 'fix', 'refactor', etc.
 							If a new file is being added, include the file name and a brief description of its purpose or contents.
 							Keep the message brief but informative.
-							For example, if a new file 'test.py' is added with a function 'helloWorld', a suitable commit message could be: 'feat: Add test.py with helloWorld function'.
+							For example, if a new file 'test.py' is added with a function 'helloWorld', a suitable commit message could be: 'feat: Add test with helloWorld function'.
 							
 							Now, generate a commit message for the following new code file:
 							
-							NEW CODE FILE${document.getText()}`
+							NEW CODE FILE${content}`
 						},
 					],
 					max_tokens: 1024,
@@ -86,9 +107,12 @@ async function createChatCompletion(file) {
 			} else {
 				throw new Error('No response from OpenAI')
 			}
-		}
+		}		
 
 		if (file.changes.length >= 1) {
+			if(file.changes.length > 3500) {
+				file.changes = file.changes.substring(0, 3500);
+			}
 			chatCompletion = await openAi.createChatCompletion({
 				model: 'gpt-3.5-turbo',
 				messages: [
@@ -175,6 +199,8 @@ async function activate(context) {
 			}
 
 			for (const file of allFilesData) {
+				const canRead = await canReadFile(file.fsPath);
+				if(!canRead) continue;
 				const document = await vscode.workspace.openTextDocument(file);
 				allFiles.push({
 					fPath: document.uri.fsPath,
@@ -184,7 +210,6 @@ async function activate(context) {
 
 			const updatedFileData = await getAllChanges(allFiles);
 			await getAllMessages(updatedFileData);
-
 			for (let fileData of updatedFileData) {
 				let cmd;
 
@@ -195,7 +220,7 @@ async function activate(context) {
 				} else {
 					cmd = `git add ${fileData.fPath} && git commit -m "${fileData.message}"`;
 				}
-				const { stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
+				const { stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
 
 				if (stderr) {
 					vscode.window.showErrorMessage(`Error committing file '${fileData.fPath}':`, stderr);
@@ -204,7 +229,7 @@ async function activate(context) {
 
 			if (autoSync) {
 				const cmd = 'git push';
-				const { stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath });
+				const { stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
 
 				if (pushStderr && !pushStderr.includes('->')) {
 					vscode.window.showErrorMessage(`Error pushing changes:`, pushStderr);
@@ -235,7 +260,7 @@ async function activate(context) {
 
 			const [repo] = await git.repositories;
 
-			const { stdout: deletedFiles, stderr } = await exec('git ls-files --deleted', { cwd: repo.rootUri.fsPath });
+			const { stdout: deletedFiles, stderr } = await exec('git ls-files --deleted', { cwd: repo.rootUri.fsPath, maxBuffer: 1024 * 1024 * 50  });
 
 			if (stderr) {
 				vscode.window.showErrorMessage(`Error for 'git ls-files --deleted' command:`, stderr);
@@ -252,10 +277,10 @@ async function activate(context) {
 			}
 
 			for (let file of allFiles) {
-				if (!fs.existsSync(file.fPath)) continue;
-
+				const canRead = await canReadFile(file.fPath);
+				if(!canRead) continue;
 				const cmd = `git diff ${file.fPath}`;
-				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath });
+				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath, maxBuffer: 1024 * 1024 * 50 });
 
 				if (stderr) {
 					vscode.window.showErrorMessage(`Error for 'git diff' command:`, stderr);
@@ -272,7 +297,7 @@ async function activate(context) {
 				}
 			}
 
-			const { stdout: untrackedFiles, stderr: stderr2 } = await exec('git ls-files --others --exclude-standard', { cwd: repo.rootUri.fsPath });
+			const { stdout: untrackedFiles, stderr: stderr2 } = await exec('git ls-files --others --exclude-standard', { cwd: repo.rootUri.fsPath, maxBuffer: 1024 * 1024 * 50  });
 
 			if (stderr2) {
 				vscode.window.showErrorMessage(`Error for 'git ls-files' command:`, stderr2);
@@ -297,7 +322,6 @@ async function activate(context) {
 
 	async function getAllMessages(allFileData) {
 		try {
-			console.log('allfileData:: ', allFileData)
 			const messagesPromises = allFileData.map(file => createChatCompletion(file));
 			const messages = await Promise.all(messagesPromises);
 			allFileData.forEach((file, index) => {
