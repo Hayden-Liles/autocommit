@@ -51,7 +51,6 @@ async function canReadFile(filePath) {
     return new Promise((resolve) => {
         fs.access(filePath, fs.constants.R_OK, (err) => {
             if (err) {
-				vscode.window.showWarningMessage(`You will need to commit this file Manually. Sorry for the inconvenience. ${filePath}`);
                 resolve(false);
             } else {
                 resolve(true);
