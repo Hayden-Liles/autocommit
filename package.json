@@ -4,7 +4,7 @@
   "displayName": "Commit It",
   "description": "",
   "repository": "https://github.com/Hayden-Liles/autocommit",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "license": "MIT",
   "engines": {
     "vscode": "^1.80.0"
