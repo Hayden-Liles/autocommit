@@ -1,339 +1,332 @@
 const vscode = require('vscode');
+const { exec } = require('child_process');
 const openAiModule = require('openai');
-const fs = require('fs');
+const fs = require('fs').promises;
+const { isText } = require('istextorbinary');
 const path = require('path');
-const util = require('util')
-const exec = util.promisify(require('child_process').exec);
 
 const apiKey = vscode.workspace.getConfiguration('AutoCommit').get('apiKey');
-const autoSync = vscode.workspace.getConfiguration('AutoCommit').get('autoSync');
 
 const configuration = new openAiModule.Configuration({
 	apiKey: apiKey
 });
 const openAi = new openAiModule.OpenAIApi(configuration);
-const gitExtension = vscode.extensions.getExtension('vscode.git')
-let chatCompletion = null;
-let isCommitting = false;
 
-class GitCommitsProvider {
-	constructor() {
-		this._onDidChangeTreeData = new vscode.EventEmitter();
-		this.onDidChangeTreeData = this._onDidChangeTreeData.event;
-	}
+function getGitChanges(workspaceRoot, callback) {
+    exec('git status --porcelain', { cwd: workspaceRoot }, (error, stdout, stderr) => {
+        const result = {
+            untracked: [],
+            modified: [],
+            unreadable: [],
+            untrackedAndUnreadable: [],
+            deleted: []
+        };
 
-	getTreeItem(element) {
-		return element;
-	}
+        if (error) {
+            console.error(`exec error: ${error}`);
+            return;
+        }
 
-	refresh() {
-		this._onDidChangeTreeData.fire();
-	}
+        const lines = stdout.split('\n');
+        for (let line of lines) {
+            const status = line.slice(0, 2).trim();
+            const file = line.slice(3).trim();
+    
+            if (status === '??') {
+                // Check if the file is a text file
+                const isTextual = isText(workspaceRoot + '/' + file);
+                console.log(`${file} is text: ${isTextual}`)
+                if (isTextual && isTextual != null) {
+                    result.untracked.push(file);
+                } else {
+                    result.unreadable.push(file);
+                }
+            } else if (['A', 'M'].includes(status)) {
+                result.modified.push(file);
+            } else if (status === 'D') {
+                result.deleted.push(file);
+            }
+            // More status codes can be added as needed
+        }
+    
 
-	
-
-	async getChildren() {
-		try {
-			await exec('git fetch origin', { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
-			const { stdout } = await exec('git log --branches --not --remotes --decorate --oneline', { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
-			const commits = stdout.split('\n').map(commit => new vscode.TreeItem(commit));
-			return commits;
-		} catch (error) {
-
-			console.error(`Failed to get commits: ${error.message}`);
-			vscode.window.showErrorMessage(`Failed to get commits: ${error.message}`);
-			return [];
-		}
-	}
+        callback(result);
+    });
 }
 
-async function canReadFile(filePath) {
-    return new Promise((resolve) => {
-        fs.access(filePath, fs.constants.R_OK, (err) => {
-            if (err) {
-                resolve(false);
+function escapeSpaces(filePath) {
+    return `${filePath}`;
+}
+
+async function getGitDiff(workspaceRoot, file) {
+    return new Promise((resolve, reject) => {
+        exec(`git diff ${file}`, { cwd: workspaceRoot }, (error, stdout, stderr) => {
+            if (error) {
+                reject(error);
             } else {
-                resolve(true);
+                resolve(stdout);
             }
         });
     });
 }
 
-async function createChatCompletion(file) {
-	try {
-		if (file.changes == 'DELETED') {
-			return 'Removing this file.'
-		}
+async function generateCommitMessage(workspaceRoot, file, changeType) {
+    let prompt;
+    if (changeType === "untracked") {
+        let content;
+        try {
+            let fullContent = await fs.readFile(workspaceRoot + '/' + file, 'utf8');
+            content = fullContent.substring(0, 3000); 
+        } catch (err) {
+            console.error(`Error reading ${file}: ${err}`);
+            return `Error reading file ${file}`;
+        }
 
-		if (file.changes == 'UNTRACKED') {
-			console.log(file)
-			const git = await gitExtension.exports.getAPI(1);
-			const [repo] = await git.repositories;
-			const absoluteFilePath = path.join(repo.rootUri.fsPath, file.fPath);
-			const document = await vscode.workspace.openTextDocument(absoluteFilePath);
+        prompt = `
+        As an AI, generate a concise, informative commit message following the Conventional Commit standard. This standard requires a commit message to outline the type of changes (e.g., 'feat', 'fix', 'refactor') and provide a brief explanation. The message should be within 50 characters and contain no line breaks.
 
-			let content = document.getText();
-			if(content.length > 4500) {
-				content = content.substring(0, 4500);
-			}
+        Guidelines:
+        
+        Begin with the type of change: 'feat', 'fix', 'refactor', etc.
+        If a new file is being added, include the file name and a brief description of its purpose or contents.
+        Keep the message brief but informative.
+        For example, if a new file 'test.py' is added with a function 'helloWorld', a suitable commit message could be: 'feat: Add test.py with helloWorld function'.
+        
+        Now, generate a commit message for the following new code file:
+        
+        NEW CODE FILES CONTENT:
+        ${content}`;
+    } else if (changeType === "modified") {
+        let diff;
+        try {
+            diff = await getGitDiff(workspaceRoot, file);
+        } catch (err) {
+            console.error(`Error getting diff for ${file}: ${err}`);
+            return `Error fetching diff for ${file}`;
+        }
 
-			if (file.changes.length >= 1) {
-				chatCompletion = await openAi.createChatCompletion({
-					model: 'gpt-3.5-turbo',
-					messages: [
-						{
-							role: 'user',
-							content: `
-							As an AI, generate a concise, informative commit message following the Conventional Commit standard. This standard requires a commit message to outline the type of changes (e.g., 'feat', 'fix', 'refactor') and provide a brief explanation. The message should be within 50 characters and contain no line breaks.
+        prompt = `
+        As an AI, your task is to generate a concise and informative commit message following the Conventional Commit standard. This standard requires a commit message to clearly outline the type of changes made and provide a brief, descriptive explanation. The commit message should ideally be within 50 characters and contain no line breaks.
+        
+        Here are the guidelines:
+        
+        Begin with the type of change:
+        'feat' for new features or significant changes that add new capabilities to the code.
+        'fix' for bug fixes.
+        'refactor' for changes in the code structure that do not alter its external behavior.
+        Other types include 'chore', 'docs', 'style', 'perf', 'test', etc.
+        If a function or method is added, modified, or removed, include that in the message.
+        Keep the message brief but informative.
+        For example, if a new feature 'test' replaces two existing functions 'helloWorld' and 'helloWorld2', a suitable commit message could be: 'feat: Replace helloWorld functions with test'.
+        
+        Now, apply these guidelines to generate a commit message for the following 'git diff':
+        
+        GIT DIFF
+        ${diff}`;
+    }
 
-							Guidelines:
-							
-							Begin with the type of change: 'feat', 'fix', 'refactor', etc.
-							If a new file is being added, include the file name and a brief description of its purpose or contents.
-							Keep the message brief but informative.
-							For example, if a new file 'test.py' is added with a function 'helloWorld', a suitable commit message could be: 'feat: Add test with helloWorld function'.
-							
-							Now, generate a commit message for the following new code file:
-							
-							NEW CODE FILE${content}`
-						},
-					],
-					max_tokens: 1024,
-				});
-			}
-			if (chatCompletion && chatCompletion.data && chatCompletion.data.choices && chatCompletion.data.choices[0]) {
-				return chatCompletion.data.choices[0].message.content;
-			} else {
-				throw new Error('No response from OpenAI')
-			}
-		}		
+    try {
+        const chatCompletion = await openAi.createChatCompletion({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 1024,
+        });
 
-		if (file.changes.length >= 1) {
-			if(file.changes.length > 4500) {
-				file.changes = file.changes.substring(0, 4500);
-			}
-			chatCompletion = await openAi.createChatCompletion({
-				model: 'gpt-3.5-turbo',
-				messages: [
-					{
-						role: 'user',
-						content: `
-The response you received is not incorrect, as the changes could be interpreted as a refactor (changing the structure of the code without changing its behavior). However, if you want to guide the AI towards interpreting the changes as a new feature (feat), you could clarify the definitions of 'feat' and 'refactor' in your prompt. Here's a revised version of the prompt:
-
-As an AI, your task is to generate a concise and informative commit message following the Conventional Commit standard. This standard requires a commit message to clearly outline the type of changes made and provide a brief, descriptive explanation. The commit message should ideally be within 50 characters and contain no line breaks.
-
-Here are the guidelines:
-
-Begin with the type of change:
-'feat' for new features or significant changes that add new capabilities to the code.
-'fix' for bug fixes.
-'refactor' for changes in the code structure that do not alter its external behavior.
-Other types include 'chore', 'docs', 'style', 'perf', 'test', etc.
-If a function or method is added, modified, or removed, include that in the message.
-Keep the message brief but informative.
-For example, if a new feature 'test' replaces two existing functions 'helloWorld' and 'helloWorld2', a suitable commit message could be: 'feat: Replace helloWorld functions with test'.
-
-Now, apply these guidelines to generate a commit message for the following 'git diff':
-
-GIT DIFF
-${file.changes}`
-					},
-				],
-				max_tokens: 1024,
-			});
-		}
-		if (chatCompletion && chatCompletion.data && chatCompletion.data.choices && chatCompletion.data.choices[0]) {
-			return chatCompletion.data.choices[0].message.content;
-		} else {
-			throw new Error('No response from OpenAI')
-		}
-	} catch (err) {
-		console.error(`Error creating chat completion: ${err.message}`);
-		vscode.window.showErrorMessage(`Error creating chat completion: ${err.message}`);
-	}
+        if (chatCompletion && chatCompletion.data && chatCompletion.data.choices && chatCompletion.data.choices[0]) {
+            return chatCompletion.data.choices[0].message.content;
+        } else {
+            throw new Error('No response from OpenAI');
+        }
+    } catch (err) {
+        console.error(`Error fetching commit message from OpenAI for ${file}: ${err}`);
+        return `Error fetching commit message for ${file}`;
+    }
 }
 
+async function pushToRemote(workspaceRoot) {
+    return new Promise((resolve, reject) => {
+        exec('git push', { cwd: workspaceRoot }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Push error: ${error}`);
+                reject(error);
+            } else {
+                console.log('Successfully pushed commits to remote.');
+                resolve();
+            }
+        });
+    });
+}
 
+class UnpushedCommitsProvider {
+    constructor(workspaceRoot) {
+        this.workspaceRoot = workspaceRoot;
+        this._onDidChangeTreeData = new vscode.EventEmitter();
+        this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    }
+
+    async getUnpushedCommits() {
+
+        const gitDir = path.join(this.workspaceRoot, '.git');
+        try {
+            await fs.access(gitDir, fs.constants.F_OK);
+        } catch (err) {
+            console.log("Workspace is not a Git repository.");
+            return [];
+        }
+
+        return new Promise((resolve, reject) => {
+            // Get log of unpushed commits
+            exec('git log @{u}.. --format="%H"', { cwd: this.workspaceRoot }, async (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Error fetching unpushed commits: ${error}`);
+                    reject(error);
+                } else {
+                    const commitHashes = stdout.trim().split('\n');
+                    let formattedCommits = [];
+    
+                    for (const hash of commitHashes) {
+                        await new Promise((resolveInner, rejectInner) => {
+                            exec(`git show ${hash} --name-only --oneline`, { cwd: this.workspaceRoot }, (err, stdout, stderr) => {
+                                if (err) {
+                                    console.error(`Error fetching commit details: ${err}`);
+                                    rejectInner(err);
+                                } else {
+                                    let parts = stdout.split('\n');
+                                    let commitMessage = parts[0].split(' ').slice(1).join(' '); // Removing the commit hash from the beginning
+                                    let fileName = parts[1]; // Taking the first modified file name
+                                    formattedCommits.push(`${fileName} : ${commitMessage}`);
+                                    resolveInner();
+                                }
+                            });
+                        });
+                    }
+                    
+                    resolve(formattedCommits);
+                }
+            });
+        });
+    }
+
+    getTreeItem(element) {
+        let treeItem = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+        treeItem.command = { 
+            command: 'updateCommitMessage', 
+            title: "Update Commit Message", 
+            arguments: [element.commitHash]  // We assume you have added commitHash to each of your tree items
+        };
+        return treeItem;
+    }
+
+    async getChildren(element) {
+        if (!element) {
+            const commits = await this.getUnpushedCommits();
+            return commits.map(commit => new vscode.TreeItem(commit));
+        }
+        return [];
+    }
+
+    refresh() {
+        this._onDidChangeTreeData.fire();
+    }
+}
 
 /**
  * @param {vscode.ExtensionContext} context
  */
 async function activate(context) {
 
-	const gitCommitsProvider = new GitCommitsProvider();
-	vscode.window.createTreeView('unpushedCommits', {
-		treeDataProvider: gitCommitsProvider,
-		showCollapseAll: true
-	});
+    const workspaceRoot = vscode.workspace.rootPath;
+    let provider = new UnpushedCommitsProvider(workspaceRoot);
+    vscode.window.registerTreeDataProvider('unpushedCommits', provider);
+    provider.refresh();
 
 	let disposable2 = vscode.commands.registerCommand('commitAll', async function commitAll() {
+        const workspaceRoot = vscode.workspace.rootPath;
 
-		if (isCommitting) {
-			vscode.window.showWarningMessage('Commit is already in progress...');
-			return;
-		}
+    if (!workspaceRoot) {
+        vscode.window.showErrorMessage("No workspace opened. Please open a Git repository.");
+        return;
+    }
 
-		isCommitting = true;
+    const changes = await new Promise(resolve => getGitChanges(workspaceRoot, resolve));
 
-		try {
-			const allFiles = [];
-			const gitignorePath = path.join(vscode.workspace.rootPath, '.gitignore');
-			let gitignoreContent;
-			let allFilesData;
+    for (const file of changes.untracked.concat(changes.modified)) {
+        const changeType = changes.untracked.includes(file) ? "untracked" : "modified";
+        const message = await generateCommitMessage(workspaceRoot, file, changeType);
+        const escapedFile = escapeSpaces(file);
 
+        await new Promise((resolve, reject) => {
+            exec(`git add ${escapedFile} && git commit -m "${message}"`, { cwd: workspaceRoot }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Commit error for ${file}: ${error}`);
+                    reject(error);
+                } else {
+                    console.log(`Committed ${file} with message: "${message}"`);
+                    resolve();
+                }
+            });
+        });
+    }
 
-			if (fs.existsSync(gitignorePath)) {
-				gitignoreContent = fs.readFileSync(gitignorePath, 'utf8');
-			}
+    for (const file of changes.unreadable.concat(changes.untrackedAndUnreadable, changes.deleted)) {
+        const action = changes.deleted.includes(file) ? "Deleted" : "Added";
+        const message = `${action} ${file}`;
+        const escapedFile = escapeSpaces(file);
 
-			if (gitignoreContent) {
-				const gitignoreLines = gitignoreContent.split('\n');
-				const gitignorePatterns = gitignoreLines
-					.filter(line => line.trim() !== '' && !line.startsWith('#'))
-					.map(line => '**/' + line.trim());
-				const excludePattern = `{${gitignorePatterns.join(',')}}`;
-				allFilesData = await vscode.workspace.findFiles('**/*', excludePattern);
-			} else {
-				allFilesData = await vscode.workspace.findFiles('**/*');
-			}
+        await new Promise((resolve, reject) => {
+            const command = changes.deleted.includes(file) 
+                ? `git rm ${escapedFile} && git commit -m "${message}"`
+                : `git add ${escapedFile} && git commit -m "${message}"`;
 
-			for (const file of allFilesData) {
-				const canRead = await canReadFile(file.fsPath);
-				if(!canRead) continue;
-				const document = await vscode.workspace.openTextDocument(file);
-				allFiles.push({
-					fPath: document.uri.fsPath,
-					documentText: document.getText()
-				});
-			}
+            exec(command, { cwd: workspaceRoot }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Commit error for ${file}: ${error}`);
+                    reject(error);
+                } else {
+                    console.log(`Committed ${file} with message: "${message}"`);
+                    resolve();
+                }
+            });
+        });
+    }
 
-			const updatedFileData = await getAllChanges(allFiles);
-			await getAllMessages(updatedFileData);
-			for (let fileData of updatedFileData) {
-				let cmd;
+    const unpushedCommitsProvider = new UnpushedCommitsProvider(workspaceRoot);
+    vscode.window.registerTreeDataProvider('unpushedCommits', unpushedCommitsProvider);
 
-				if (fs.existsSync(fileData.fPath)) {
-					cmd = `git add "${fileData.fPath}" && git commit -m "${fileData.message}"`;
-				} else if (fileData.changes == 'DELETED') {
-					cmd = `git rm "${fileData.fPath}" && git commit -m "${fileData.message}"`;
-				} else {
-					cmd = `git add "${fileData.fPath}" && git commit -m "${fileData.message}"`;
-				}
-				const { stderr } = await exec(cmd, { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
+    const autoSyncEnabled = vscode.workspace.getConfiguration('AutoCommit').get('autoSync');
+    if (autoSyncEnabled) {
+        await pushToRemote(workspaceRoot);
+    } else {
+        unpushedCommitsProvider.refresh();
+    }
+    });
 
-				if (stderr) {
-					vscode.window.showErrorMessage(`Error committing file '${fileData.fPath}':`, stderr);
-				}
-			}
-
-			if (autoSync) {
-				const cmd = 'git push';
-				const { stderr: pushStderr } = await exec(cmd, { cwd: vscode.workspace.rootPath, maxBuffer: 1024 * 1024 * 50  });
-
-				if (pushStderr && !pushStderr.includes('->')) {
-					vscode.window.showErrorMessage(`Error pushing changes:`, pushStderr);
-				}
-			}
-
-			gitCommitsProvider.refresh();
-		} catch (error) {
-			console.error(`Error committing all: ${error.message}`);
-			vscode.window.showErrorMessage(`Error committing all: ${error.message}`);
-		} finally {
-			isCommitting = false;
-		}
-	});
-
-	const util = require("util");
-	const childProcess = require("child_process");
-	const exec = util.promisify(childProcess.exec);
-
-	async function getAllChanges(allFiles) {
-		try {
-			const allFilesData = [];
-			const git = await gitExtension.exports.getAPI(1);
-
-			if (!git || !git.repositories || git.repositories.length === 0) {
-				throw new Error('No git repositories found');
-			}
-
-			const [repo] = await git.repositories;
-
-			const { stdout: deletedFiles, stderr } = await exec('git ls-files --deleted', { cwd: repo.rootUri.fsPath, maxBuffer: 1024 * 1024 * 50  });
-
-			if (stderr) {
-				vscode.window.showErrorMessage(`Error for 'git ls-files --deleted' command:`, stderr);
-			} else {
-				deletedFiles.split('\n').forEach(file => {
-					if (file) {
-						const fileData = {
-							fPath: file,
-							changes: 'DELETED'
-						};
-						allFilesData.push(fileData);
-					}
-				});
-			}
-
-			for (let file of allFiles) {
-				const canRead = await canReadFile(file.fPath);
-				if(!canRead) continue;
-				const cmd = `git diff "${file.fPath}"`;
-				const { stdout, stderr } = await exec(cmd, { cwd: repo.rootUri.fsPath, maxBuffer: 1024 * 1024 * 50 });
-
-				if (stderr) {
-					vscode.window.showErrorMessage(`Error for 'git diff' command:`, stderr);
-					continue;
-				}
-
-				if (stdout !== '') {
-					const fileData = {
-						fPath: file.fPath,
-						changes: stdout,
-						text: file.documentText
-					};
-					allFilesData.push(fileData);
-				}
-			}
-
-			const { stdout: untrackedFiles, stderr: stderr2 } = await exec('git ls-files --others --exclude-standard', { cwd: repo.rootUri.fsPath, maxBuffer: 1024 * 1024 * 50  });
-
-			if (stderr2) {
-				vscode.window.showErrorMessage(`Error for 'git ls-files' command:`, stderr2);
-			} else {
-				untrackedFiles.split('\n').forEach(file => {
-					if (file) {
-						const fileData = {
-							fPath: file,
-							changes: 'UNTRACKED',
-						};
-						allFilesData.push(fileData);
-					}
-				});
-			}
-
-			return allFilesData || [];
-		} catch (error) {
-			console.error(`Error getting all changes: ${error.message}`);
-			vscode.window.showErrorMessage(`Error getting all changes: ${error.message}`);
-		}
-	}
-
-	async function getAllMessages(allFileData) {
-		try {
-			console.log(`All file data: ${allFileData}`)
-			const messagesPromises = allFileData.map(file => createChatCompletion(file));
-			const messages = await Promise.all(messagesPromises);
-			allFileData.forEach((file, index) => {
-				file.message = messages[index];
-			});
-		} catch (error) {
-			console.error(`Error getting all messages: ${error.message}`);
-			vscode.window.showErrorMessage(`Error getting all messages: ${error.message}`);
-		}
-	}
-
+    let updateCommitMessageCmd = vscode.commands.registerCommand('updateCommitMessage', async (commitHash) => {
+        let newMessage = await vscode.window.showInputBox({
+            prompt: 'Enter the new commit message'
+        });
+    
+        // If the user provides a new message, then update the commit
+        if (newMessage && newMessage.trim() !== "") {
+            exec(`git commit --amend -m "${newMessage}"`, { cwd: vscode.workspace.rootPath }, (error, stdout, stderr) => {
+                if (error) {
+                    vscode.window.showErrorMessage(`Error updating commit message: ${error}`);
+                } else {
+                    vscode.window.showInformationMessage('Commit message updated successfully!');
+                    
+                    // Refresh the unpushed commits view
+                    provider.refresh();
+                }
+            });
+        }
+    });
 	context.subscriptions.push(disposable2)
+    context.subscriptions.push(updateCommitMessageCmd);
 }
 
 function deactivate() { }
