@@ -197,15 +197,14 @@ class UnpushedCommitsProvider {
                                     rejectInner(err);
                                 } else {
                                     let parts = stdout.split('\n');
-                                    let commitMessage = parts[0].split(' ').slice(1).join(' '); // Removing the commit hash from the beginning
-                                    let fileName = parts[1]; // Taking the first modified file name
-                                    formattedCommits.push(`${fileName} : ${commitMessage}`);
+                                    let commitMessage = parts[0].split(' ').slice(1).join(' ');
+                                    let fileName = parts[1];
+                                    formattedCommits.push({ label: `${fileName} : ${commitMessage}`, commitHash: hash });
                                     resolveInner();
                                 }
                             });
                         });
                     }
-                    
                     resolve(formattedCommits);
                 }
             });
@@ -213,13 +212,7 @@ class UnpushedCommitsProvider {
     }
 
     getTreeItem(element) {
-        let treeItem = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
-        treeItem.command = { 
-            command: 'updateCommitMessage', 
-            title: "Update Commit Message", 
-            arguments: [element.commitHash]  // We assume you have added commitHash to each of your tree items
-        };
-        return treeItem;
+        return element;
     }
 
     async getChildren(element) {
@@ -305,28 +298,8 @@ async function activate(context) {
         unpushedCommitsProvider.refresh();
     }
     });
-
-    let updateCommitMessageCmd = vscode.commands.registerCommand('updateCommitMessage', async (commitHash) => {
-        let newMessage = await vscode.window.showInputBox({
-            prompt: 'Enter the new commit message'
-        });
     
-        // If the user provides a new message, then update the commit
-        if (newMessage && newMessage.trim() !== "") {
-            exec(`git commit --amend -m "${newMessage}"`, { cwd: vscode.workspace.rootPath }, (error, stdout, stderr) => {
-                if (error) {
-                    vscode.window.showErrorMessage(`Error updating commit message: ${error}`);
-                } else {
-                    vscode.window.showInformationMessage('Commit message updated successfully!');
-                    
-                    // Refresh the unpushed commits view
-                    provider.refresh();
-                }
-            });
-        }
-    });
 	context.subscriptions.push(disposable2)
-    context.subscriptions.push(updateCommitMessageCmd);
 }
 
 function deactivate() { }
